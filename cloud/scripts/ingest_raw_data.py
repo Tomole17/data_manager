@@ -100,7 +100,7 @@ if __name__ == "__main__":
     # API Task (Still just PL for now as per free tier)
     api_data = fetch_api_data()
     if api_data:
-        s3.put_object(Bucket=bucket, Key="raw/api_pl_standings.json", Body=json.dumps(api_data))
+        s3.put_object(Bucket=bucket, Key="raw/api_pl_standings.json", Body = json.dumps(api_data, ensure_ascii=False))
         print("💾 API data saved to R2.")
 
     # Multi-League Scrape Task
@@ -109,6 +109,6 @@ if __name__ == "__main__":
         s3.put_object(
             Bucket=bucket, 
             Key="raw/bbc_scraped_teams_all.json", 
-            Body=json.dumps(multi_league_results)
+            Body=json.dumps(multi_league_results, ensure_ascii=False)
         )
         print("💾 All Leagues data saved to R2 (Bronze).")

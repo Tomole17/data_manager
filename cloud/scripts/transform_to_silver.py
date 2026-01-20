@@ -182,14 +182,25 @@ def transform_to_silver():
 
     # 3. Upload Results
     csv_buffer = StringIO()
-    df_final.to_csv(csv_buffer, index=False)
-    s3.put_object(Bucket=bucket, Key="silver/all_english_teams_master.csv", Body=csv_buffer.getvalue())
+    # Add encoding here to ensure the buffer handles the emojis correctly
+    df_final.to_csv(csv_buffer, index=False, encoding='utf-8') 
+    
+    s3.put_object(
+        Bucket=bucket, 
+        Key="silver/all_english_teams_master.csv", 
+        Body=csv_buffer.getvalue().encode('utf-8') # Convert the string to UTF-8 bytes
+    )
 
     # 4. Upload Review Log
     if not df_review.empty:
         review_buffer = StringIO()
-        df_review.to_csv(review_buffer, index=False)
-        s3.put_object(Bucket=bucket, Key="silver/review_needed_names.csv", Body=review_buffer.getvalue())
+        df_review.to_csv(review_buffer, index=False, encoding='utf-8') # Add encoding
+        
+        s3.put_object(
+            Bucket=bucket, 
+            Key="silver/review_needed_names.csv", 
+            Body=review_buffer.getvalue().encode('utf-8') # Convert to UTF-8 bytes
+        )
         print(f"⚠️ {len(df_review)} names flagged for review in silver/review_needed_names.csv")
 
     print(f"✅ Master file updated with {len(df_final)} teams.")
