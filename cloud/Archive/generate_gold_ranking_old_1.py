@@ -5,7 +5,6 @@ from io import StringIO
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
-from google.cloud import bigquery # New requirement
 
 # Load env
 script_dir = Path(__file__).resolve().parent
@@ -24,15 +23,10 @@ def generate_gold_csv():
     s3 = get_s3_client()
     bucket = os.getenv('BUCKET_NAME')
     
-    # BigQuery Config (Add these to your .env)
-    bq_project = os.getenv('GBQ_PROJECT_ID')
-    bq_table_id = f"{bq_project}.{os.getenv('GBQ_DATASET')}.{os.getenv('GBQ_TABLE')}"
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv('GBQ_KEY_PATH')
-
-    print("🥇 Generating Gold Presentation Layer...")
+    print("🥇 Generating Gold Presentation Layer from Silver...")
 
     try:
-        # 1. Load Silver Data from R2
+        # 1. Load Silver Data from S3
         response = s3.get_object(Bucket=bucket, Key="silver/all_english_teams_master.csv")
         gold_df = pd.read_csv(response['Body'], encoding='utf-8') 
         
@@ -40,39 +34,35 @@ def generate_gold_csv():
         final_output = pd.DataFrame({
             "ClubName": gold_df['standard_name'],
             "League": gold_df['league'],
-            "Season_Year": 2025, # BigQuery dislikes spaces in column names
-            "Positions": gold_df.groupby('league').cumcount() + 1,
-            "Updated_At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "Season Year": 2025,
+            "Positions": gold_df.groupby('league').cumcount() + 1
         })
 
-        # 3. Timestamp & Filename (Format: DDMMYYYY_hhmm)
+        # 3. NEW TIMESTAMP FORMAT: DDMMYYYY_hhmm
         timestamp = datetime.now().strftime("%d%m%Y_%H%M")
         filename = f"sample-league-ranking_{timestamp}.csv"
         
-        # --- PHASE 1: LOCAL SAVE ---
-        local_dir = script_dir / "gold_backups"
-        local_dir.mkdir(exist_ok=True)
-        final_output.to_csv(local_dir / filename, index=False, encoding='utf-8')
-        print(f"💾 Saved Locally: {filename}")
+        # --- LOCAL LOGIC START ---
+        # Ensure 'gold' directory exists locally in the script's directory
+        local_gold_dir = script_dir / "gold"
+        local_gold_dir.mkdir(parents=True, exist_ok=True)
+        
+        local_path = local_gold_dir / filename
+        final_output.to_csv(local_path, index=False, encoding='utf-8')
+        print(f"💾 Gold file saved locally: {local_path}")
+        # --- LOCAL LOGIC END ---
 
-        # --- PHASE 2: CLOUDFLARE R2 UPLOAD ---
+        # 4. Upload as true CSV to S3
         csv_buffer = StringIO()
         final_output.to_csv(csv_buffer, index=False, encoding='utf-8') 
+        
         s3.put_object(
             Bucket=bucket, 
             Key=f"gold/{filename}", 
             Body=csv_buffer.getvalue().encode('utf-8')
         )
-        print(f"✅ Uploaded to R2: gold/{filename}")
-
-        # --- PHASE 3: BIGQUERY APPEND ---
-        print("📊 Streaming data to BigQuery...")
-        bq_client = bigquery.Client()
-        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND") # Appends new data
         
-        bq_job = bq_client.load_table_from_dataframe(final_output, bq_table_id, job_config=job_config)
-        bq_job.result() # Wait for completion
-        print(f"🚀 Successfully appended to BigQuery table: {bq_table_id}")
+        print(f"✅ Gold file uploaded to R2: gold/{filename}")
 
     except Exception as e:
         print(f"❌ Gold Generation failed: {e}")
