@@ -42,6 +42,7 @@ def main():
     
     pipeline_steps = [
         "scripts/ingest_raw_data.py",
+        #"scripts/scrape_facebook_stats.py",
         "scripts/transform_to_silver.py",
         "scripts/generate_gold_ranking.py"
     ]

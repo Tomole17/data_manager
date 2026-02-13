@@ -24,10 +24,13 @@ def generate_gold_csv():
     s3 = get_s3_client()
     bucket = os.getenv('BUCKET_NAME')
     
-    # BigQuery Config (Add these to your .env)
+    # BigQuery Config
     bq_project = os.getenv('GBQ_PROJECT_ID')
     bq_table_id = f"{bq_project}.{os.getenv('GBQ_DATASET')}.{os.getenv('GBQ_TABLE')}"
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.getenv('GBQ_KEY_PATH')
+    
+    raw_key_path = os.getenv('GBQ_KEY_PATH')
+    clean_key_path = str(Path(raw_key_path).resolve()) 
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = clean_key_path
 
     print("🥇 Generating Gold Presentation Layer...")
 
@@ -36,26 +39,25 @@ def generate_gold_csv():
         response = s3.get_object(Bucket=bucket, Key="silver/all_english_teams_master.csv")
         gold_df = pd.read_csv(response['Body'], encoding='utf-8') 
         
-        # 2. Re-format for Gold
+        # 2. Re-format for Gold (Updated_At removed, Season_Year kept for BQ compatibility)
         final_output = pd.DataFrame({
             "ClubName": gold_df['standard_name'],
             "League": gold_df['league'],
-            "Season_Year": 2025, # BigQuery dislikes spaces in column names
-            "Positions": gold_df.groupby('league').cumcount() + 1,
-            "Updated_At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "Season Year": 2025, 
+            "Positions": gold_df.groupby('league').cumcount() + 1
         })
 
-        # 3. Timestamp & Filename (Format: DDMMYYYY_hhmm)
+        # 3. Timestamp & Filename
         timestamp = datetime.now().strftime("%d%m%Y_%H%M")
         filename = f"sample-league-ranking_{timestamp}.csv"
         
-        # --- PHASE 1: LOCAL SAVE ---
+        # --- PHASE 1: LOCAL SAVE (Restored) ---
         local_dir = script_dir / "gold_backups"
         local_dir.mkdir(exist_ok=True)
         final_output.to_csv(local_dir / filename, index=False, encoding='utf-8')
         print(f"💾 Saved Locally: {filename}")
 
-        # --- PHASE 2: CLOUDFLARE R2 UPLOAD ---
+        # --- PHASE 2: CLOUDFLARE R2 UPLOAD (Restored) ---
         csv_buffer = StringIO()
         final_output.to_csv(csv_buffer, index=False, encoding='utf-8') 
         s3.put_object(
@@ -65,14 +67,17 @@ def generate_gold_csv():
         )
         print(f"✅ Uploaded to R2: gold/{filename}")
 
-        # --- PHASE 3: BIGQUERY APPEND ---
-        print("📊 Streaming data to BigQuery...")
+        # --- PHASE 3: BIGQUERY UPDATE ---
+        print("📊 Updating BigQuery schema and data...")
         bq_client = bigquery.Client()
-        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_APPEND") # Appends new data
+        
+        # Using WRITE_TRUNCATE to ensure the removed 'Updated_At' column 
+        # doesn't cause a schema mismatch error.
+        job_config = bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE")
         
         bq_job = bq_client.load_table_from_dataframe(final_output, bq_table_id, job_config=job_config)
-        bq_job.result() # Wait for completion
-        print(f"🚀 Successfully appended to BigQuery table: {bq_table_id}")
+        bq_job.result() 
+        print(f"🚀 Successfully updated BigQuery table: {bq_table_id}")
 
     except Exception as e:
         print(f"❌ Gold Generation failed: {e}")
